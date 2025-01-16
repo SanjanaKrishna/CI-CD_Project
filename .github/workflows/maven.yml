@@ -4,25 +4,16 @@ on:
   push:
     branches:
       - main 
-      # - 'feature/*'
+ 
   pull_request:
     branches:
-      - main
-      # - 'feature/*'
-      
-  # workflow_dispatch:
-  #   inputs:
-  #     deploy:
-  #       description: 'Trigger deploy to production'
-  #       required: true
-  #       default: 'false'
-
+      - main 
+  
 jobs:
-  # Parallel Job: Build and Test on Self-Hosted EC2 (with Tomcat installed)
-  build_and_test:
-    # This job will run on a self-hosted runner with the "staging" label.
-    # Ensure your self-hosted runner for staging has the label `staging` assigned to it.
-    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat installed (Staging)
+  
+  build_and_unit_test:
+       
+    runs-on: [self-hosted, staging]
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
@@ -34,28 +25,26 @@ jobs:
 
       - name: Build with Maven
         run: mvn clean install -DskipTests
-        if: ${{ github.event_name != 'pull_request' }}  # Only run on push events, skip for PR
+        if: ${{ github.event_name != 'pull_request' }} 
 
       - name: Run Unit Tests with Maven
         run: mvn test
-        if: ${{ success() }}  # Run this step only if the previous build step succeeded
+        if: ${{ success() }} 
 
   # Sequential Jobs: SonarQube Analysis and Artifact Upload
   sonar_analysis:
-    # This job will also run on the self-hosted runner with the "staging" label.
-    # Ensure the staging runner has the "staging" label.
-    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat installed (Staging)
-    needs: build_and_test
-    if: ${{ needs.build_and_test.result == 'success' }}  # Run only if build and test succeed
+    runs-on: [self-hosted, staging]
+    needs: build_and_unit_test
+    if: ${{ needs.build_and_unit_test.result == 'success' }} 
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+          fetch-depth: 0 
       - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
            java-version: 17
-           distribution: 'zulu' # Alternative distribution options are available.
+           distribution: 'zulu'
       - name: Cache SonarQube packages
         uses: actions/cache@v4
         with:
@@ -74,11 +63,9 @@ jobs:
         run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=SanjanaKrishna_CI-CD_Project
 
   upload_artifact:
-    # This job will also run on the self-hosted runner with the "staging" label.
-    # Ensure the staging runner has the "staging" label.
-    runs-on: [self-hosted, staging]  # Self-hosted EC2 with Tomcat installed (Staging)
-    needs: build_and_test
-    if: ${{ needs.build_and_test.result == 'success' }}  # Run only if build and test succeed
+    runs-on: [self-hosted, staging]
+    needs: build_and_unit_test
+    if: ${{ needs.build_and_unit_test.result == 'success' }}  
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
@@ -98,38 +85,30 @@ jobs:
                 </settings>" > ~/.m2/settings.xml
 
           mvn clean deploy
-        # run: |
-        #   echo "Uploading artifact to JFrog Artifactory..."
-        #   curl -u "${{ secrets.JFROG_USERNAME }}:${{ secrets.JFROG_API_KEY }}" \
-        #        -T target/my-helloworld.war \
-        #        "https://jfrog.example.com/artifactory/my-repo/my-helloworld-${{ needs.build_and_test.outputs.version }}.war"
+       
 
   # Matrix Job: Deployment to Staging and Production (Self-Hosted EC2 with Tomcat installed)
   deploy:
-    # This job will deploy to both staging and production environments based on the matrix configuration.
-    # The staging environment will use the self-hosted runner with the "staging" label.
-    # The production environment will use the self-hosted runner with the "production" label.
-    runs-on: self-hosted  # Use dynamic environment (staging or production)
-    needs: [sonar_analysis, upload_artifact]  # Waits for SonarQube and Artifactory jobs to complete
+    runs-on: self-hosted  
+    needs: [sonar_analysis, upload_artifact] 
     strategy:
       matrix:
-        environment: [staging, production]  # Deploy to both staging and production environments
+        environment: [staging, production]
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
 
       - name: Deploy to Tomcat (Staging/Production)
         run: |
-          echo "Deploying to ${{matrix.environment}}..."
+          echo "Deploying to ${{matrix.environment}}!!!"
 
-          # Deploy artifact to the appropriate Tomcat server based on the environment
+         
           if [ "${{ matrix.environment }}" == "staging" ]; then
-            # Deployment to the staging environment
             sudo chown -R ubuntu:ubuntu /opt 
             cd /opt/apache-tomcat-10.1.34/webapps/
             curl -L -u "admin:cmVmdGtuOjAxOjE3Njg1NjE0Mjk6aU9jaXYxTFZDaVVZSzRqV2tLc0JrM0k1T0ht" -O "http://13.232.193.124:8082/artifactory/assignment-libs-release-local/com/example/my-helloworld/1.0.0/my-helloworld-1.0.0.war"
           elif [ "${{ matrix.environment }}" == "production" ]; then
-            # Deployment to the production environment (only triggered on master branch)
+           
             if [[ $GITHUB_REF == "refs/heads/master" ]]; then
               cd /opt/apache-tomcat-10.1.34/webapps/
               curl -L -u "admin:cmVmdGtuOjAxOjE3Njg1NjE0Mjk6aU9jaXYxTFZDaVVZSzRqV2tLc0JrM0k1T0ht" -O "http://13.232.193.124:8082/artifactory/assignment-libs-release-local/com/example/my-helloworld/1.0.0/my-helloworld-1.0.0.war"
@@ -137,6 +116,6 @@ jobs:
               echo "Skipping production deployment: Only from master branch"
             fi
           fi
-        if: ${{ needs.upload_artifact.result == 'success' }}  # Deploy only if the artifact upload was successful
+        if: ${{ needs.upload_artifact.result == 'success' }}  
 
  
